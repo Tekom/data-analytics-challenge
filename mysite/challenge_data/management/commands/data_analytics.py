@@ -17,17 +17,17 @@ class Command(BaseCommand):
     help = 'Data cleaning and data analytics'
 
     def handle(self, *args, **kwargs):
-        data_creators = Creator.objects.all().values()
-        data_ideas = Idea.objects.all().values()
+        data_creators = Creator.objects.all().values() #Get all creators from creator models
+        data_ideas = Idea.objects.all().values() #get all idead from idea model
 
-        dataframe_ideas = pd.DataFrame(data_ideas)
-        dataframe_creator = pd.DataFrame(data_creators)
+        dataframe_ideas = pd.DataFrame(data_ideas) #convert creator data into a dataframe
+        dataframe_creator = pd.DataFrame(data_creators) #convert ideas dta into a dataframe
 
         cleaned_df = self.handle_missing_data(df_ideas = dataframe_ideas,
-                                              df_creator = dataframe_creator)
+                                              df_creator = dataframe_creator) #function for handling missing data on creator_department
 
-        df_without_outliers = self.handle_outliers(df = cleaned_df)
-        df_with_derived_columns = self.create_derived_columns(df = df_without_outliers)
+        df_without_outliers = self.handle_outliers(df = cleaned_df) #handling outliers for integer features
+        df_with_derived_columns = self.create_derived_columns(df = df_without_outliers)#add derived columns from actual columns
         analysis = self.analysis_by_creator_department(df = df_with_derived_columns)
 
         self.display_results(analysis)
@@ -37,31 +37,31 @@ class Command(BaseCommand):
                             df_ideas: pd.DataFrame = None,
                             df_creator: pd.DataFrame = None) -> pd.DataFrame:
 
-        le = LabelEncoder()
-        grouped_df = df_ideas.groupby('creator_id').sum()
+        le = LabelEncoder() #for enconding categorical features
+        grouped_df = df_ideas.groupby('creator_id').sum() #group idea dataset by creator_id for having each creator with his department
 
-        df_creator['department num'] = le.fit_transform(df_creator['department'])
-        id_deparment = dict(zip(df_creator['id'].to_list(), df_creator['department num'].to_list()))
+        df_creator['department num'] = le.fit_transform(df_creator['department']) #convert department feature into numerical
+        id_deparment = dict(zip(df_creator['id'].to_list(), df_creator['department num'].to_list())) #pointing id of creator with department num
 
-        grouped_df['department num'] = grouped_df.index.map(id_deparment)
-        grouped_df['department num'] = grouped_df['department num'].apply(lambda x: np.nan if x == 0 else x)
+        grouped_df['department num'] = grouped_df.index.map(id_deparment) #add deparment num feature into gropuped df
+        grouped_df['department num'] = grouped_df['department num'].apply(lambda x: np.nan if x == 0 else x) #replace the value of 0 with np.nan due those values are the missing values we want to find
 
-        train_columns = ['votes', 'comments', 'views', 'department num']
-        data_imputed = self.model(train_data = grouped_df[train_columns])
+        train_columns = ['votes', 'comments', 'views', 'department num'] #train columns for imputer
+        data_imputed = self.model(train_data = grouped_df[train_columns]) #model to find missing values of creator_department feautre
 
-        department_imputed = list(le.inverse_transform(data_imputed['department num'].astype('int')))
+        department_imputed = list(le.inverse_transform(data_imputed['department num'].astype('int'))) #transform deparment num with is corresponding label of creator_department
         grouped_df['department'] = department_imputed
 
         id_department = dict(zip(grouped_df.index.to_list(), grouped_df['department'].to_list()))
         df_creator['department'] = df_creator['id'].map(id_department)
-        df_creator.drop('department num', axis=1, inplace=True)
-        df_creator.columns = ['creator_id', 'department']
+        df_creator.drop('department num', axis=1, inplace=True) #drop deparment columns
+        df_creator.columns = ['creator_id', 'department'] #change column names for merging
 
-        merged_df = pd.merge(left = df_ideas, right = df_creator, how = 'left', on = 'creator_id')
-        cleaned_df = self.clean_keywords(df = merged_df)
+        merged_df = pd.merge(left = df_ideas, right = df_creator, how = 'left', on = 'creator_id') #merge creator and idea dataset for futher analysis
+        cleaned_df = self.clean_keywords(df = merged_df) #clean keywords featture
 
-        self.replace_missing_data(df_creators=df_creator,
-                                  df_ideas=merged_df)
+        # self.replace_missing_data(df_creators=df_creator,
+        #                           df_ideas=merged_df)
 
         return cleaned_df
 
@@ -98,9 +98,9 @@ class Command(BaseCommand):
         Creator.objects.bulk_update(creators_to_update, ['department'])
 
     def clean_keywords(self, df: pd.DataFrame) -> pd.DataFrame:
-        df['keywords'] = df['keywords'].apply(lambda x: x + " " if x != " " else x)
-        grouped_df_department = df.groupby('department').sum(numeric_only=False)
-        grouped_df_department['keywords'] = grouped_df_department['keywords'].apply(lambda x: x.split(" "))
+        df['keywords'] = df['keywords'].apply(lambda x: x + " " if x != " " else x) #add a space beetween each value for them split them correctly
+        grouped_df_department = df.groupby('department').sum(numeric_only=False) #group by department to see all the keywords related to a department
+        grouped_df_department['keywords'] = grouped_df_department['keywords'].apply(lambda x: x.split(" ")) #making a list with all the keywords per department
         grouped_df_department
 
 
@@ -108,7 +108,7 @@ class Command(BaseCommand):
         most_frequent_keywords = dict()
 
         for department in departments:
-            test = grouped_df_department[grouped_df_department.index == department]['keywords'].to_list()[0]
+            test = grouped_df_department[grouped_df_department.index == department]['keywords'].to_list()[0] #take all the keywords from department
             new_keywords = []
 
             for keyword in test:
@@ -118,8 +118,8 @@ class Command(BaseCommand):
                     new_keywords.append(keyword.strip().replace(",",""))
 
             cantidad = dict(Counter(new_keywords))
-            diccionario_ordenado = dict(sorted(cantidad.items(), key=lambda item: item[1], reverse=True))
-            words = list(diccionario_ordenado.keys())[0:3]
+            diccionario_ordenado = dict(sorted(cantidad.items(), key=lambda item: item[1], reverse=True)) #order dictionary from asc to des for getting the most frequent words per department
+            words = list(diccionario_ordenado.keys())[0:3]#take the most 3 frequent keywords from each department
 
             text = ""
 
@@ -129,26 +129,35 @@ class Command(BaseCommand):
             most_frequent_keywords[department] = text.strip()
 
         df['keywords'] = np.where(
-            df['keywords'] == " ",  # Condición: si el Creator Department es nulo
-            df['department'].map(most_frequent_keywords),   # Reemplaza con la moda de Creator Department según Idea Status
-            df['keywords']               # Mantiene el valor original si no es nulo
-        )
+            df['keywords'] == " ",  
+            df['department'].map(most_frequent_keywords),   
+            df['keywords']               
+
+        ) #replace missing keywords values into the dataset
 
         return df
 
     def model(self, train_data: pd.DataFrame = None) -> pd.DataFrame:
-        imputer = IterativeImputer(random_state=100)
+        imputer = IterativeImputer(random_state=100) #model to impute missing values
 
         df_imputed = pd.DataFrame(imputer.fit_transform(train_data), columns=train_data.columns)
-        df_imputed['department num'] = df_imputed['department num'].apply(lambda x: round(x))
+        df_imputed['department num'] = df_imputed['department num'].apply(lambda x: round(x)) #round imputed columns to integers
 
         return df_imputed
 
 # Step 2: Handle Outliers
     def handle_outliers(self, df: pd.DataFrame = None) -> pd.DataFrame:
-        outlier_columns = ['votes', 'comments', 'views']
+        outlier_columns = ['votes', 'comments', 'views'] #columns for removing outliers
+
+        # sns.histplot(df[outlier_columns])
         # sns.boxplot(df[['votes', 'comments', 'views']])
         # plt.show()
+
+        """
+        After looking at the distribution of all 3 features, we know all of them are right skewed,
+        and because we have a small dataset, winsorization could be one of he best options. we are going
+        to move the 1% of our lower data will replace with percentile 1 and 5% of our highest data will be replaced por percentile 95
+        """
 
         for column in outlier_columns:
             df[f'{column}'] = mstats.winsorize(df[column], limits=[0.01, 0.05])
@@ -160,16 +169,16 @@ class Command(BaseCommand):
 
 # Step 3: Create Derived Columns
     def create_derived_columns(self, df: pd.DataFrame) -> pd.DataFrame:
-        df['total_interactions'] = df['votes'] + df['comments']
-        df['average_interactions'] = round(df['total_interactions'] / 3, 2)
-        # df['days_since_submission'] = (pd.Timestamp.now() - df['submitted_date_time'].dt.tz_localize(None)).dt.days
+        df['total_interactions'] = df['votes'] + df['comments'] #adding total_interactions per idea
+        df['average_interactions'] = round(df['total_interactions'] / 3, 2) #average of interacions per idea
+       
 
         df['date'] = df['submitted_date_time'].apply(lambda x: str(x).split(" ")[0])
-        df['date'] = pd.to_datetime(df['date'], format = '%Y-%m-%d')
+        df['date'] = pd.to_datetime(df['date'], format = '%Y-%m-%d') #adding date columns without timestamp
 
-        df['comment_ratio_per_views'] = (df['comments'] / df['views']) 
-        df['vote_ratio_per_views'] = (df['votes'] / df['views']) 
-        df['interactions_ratio'] = ((df['comments'] + df['votes']) / df['views']) 
+        df['comment_ratio_per_views'] = (df['comments'] / df['views']) #ratio of comments per views
+        df['vote_ratio_per_views'] = (df['votes'] / df['views']) #ratio of votes per views
+        df['interactions_ratio'] = ((df['comments'] + df['votes']) / df['views']) #ratio of overall interactions per views 
 
         return df
 
@@ -178,16 +187,16 @@ class Command(BaseCommand):
         df['date'] = pd.to_datetime(df['date'], format = '%Y-%m-%d')
         df['year'] = df['date'].dt.year
 
-        interactions_by_year = df.groupby(['department', 'year'])['average_interactions'].sum().reset_index()
+        interactions_by_year = df.groupby(['department', 'year'])['average_interactions'].sum().reset_index() #take sum of average_interactions from each department per year
 
         ratios_by_department = df.groupby('department').agg({
             'comment_ratio_per_views': 'mean',
             'vote_ratio_per_views': 'mean',
             'interactions_ratio': 'mean',
             'views': 'sum'
-        })
+        }) #looking at the highest ratios per deparment
 
-        status_counts = df.groupby(['department', 'status']).size().reset_index(name='count')
+        status_counts = df.groupby(['department', 'status']).size().reset_index(name='count') #analyse status of ideas per department
 
         # Calculate the total count per department
         total_counts = df.groupby('department').size().reset_index(name='total_count')
@@ -199,7 +208,6 @@ class Command(BaseCommand):
         # Display the status ratios
         status_ratios.sort_values(by=['department', 'ratio'], ascending=[True, False], inplace=True)
 
-        # Group the data by department and year to calculate total interactions
         return (ratios_by_department, interactions_by_year, status_ratios)
     
 # Step 5: Display Results
